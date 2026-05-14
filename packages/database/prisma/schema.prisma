@@ -1,0 +1,544 @@
+// ============================================
+// SCHÉMA BASE DE DONNÉES PHARMA-DJ
+// ============================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// UTILISATEURS ET SÉCURITÉ
+// ============================================
+
+enum Role {
+  ADMIN
+  PHARMACIEN_TITULAIRE
+  PHARMACIEN_ADJOINT
+  PREPARATEUR
+  CAISSIER
+}
+
+model Utilisateur {
+  id                  String    @id @default(uuid())
+  email               String    @unique
+  motDePasse          String
+  nom                 String
+  prenom              String
+  telephone           String?
+  role                Role
+  actif               Boolean   @default(true)
+  derniereConnexion   DateTime?
+  dateExpirationMdp   DateTime?
+  tentativesEchouees  Int       @default(0)
+  bloqueJusqu         DateTime?
+  refreshTokens       RefreshToken[]
+  ventes              Vente[]
+  ordonnances         Ordonnance[]
+  mouvementsStock     MouvementStock[]
+  journaux            JournalAudit[]
+  cloturesCaisse      ClotureCaisse[]
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([email])
+  @@map("utilisateurs")
+}
+
+model RefreshToken {
+  id            String      @id @default(uuid())
+  token         String      @unique
+  utilisateurId String
+  utilisateur   Utilisateur @relation(fields: [utilisateurId], references: [id], onDelete: Cascade)
+  expiresAt     DateTime
+  revokedAt     DateTime?
+  createdAt     DateTime    @default(now())
+
+  @@index([token])
+  @@map("refresh_tokens")
+}
+
+model JournalAudit {
+  id            String      @id @default(uuid())
+  utilisateurId String?
+  utilisateur   Utilisateur? @relation(fields: [utilisateurId], references: [id])
+  action        String
+  entite        String
+  entiteId      String?
+  details       Json?
+  ipAddress     String?
+  userAgent     String?
+  createdAt     DateTime    @default(now())
+
+  @@index([utilisateurId])
+  @@index([entite, entiteId])
+  @@index([createdAt])
+  @@map("journal_audit")
+}
+
+// ============================================
+// CATALOGUE PRODUITS
+// ============================================
+
+enum FormeGalenique {
+  COMPRIME
+  GELULE
+  SIROP
+  POMMADE
+  CREME
+  GEL
+  INJECTABLE
+  SUPPOSITOIRE
+  GOUTTES
+  SPRAY
+  PATCH
+  POUDRE
+  AUTRE
+}
+
+enum StatutProduit {
+  VENTE_LIBRE
+  SUR_ORDONNANCE
+  STUPEFIANT
+  LISTE_I
+  LISTE_II
+}
+
+model FamilleProduit {
+  id          String    @id @default(uuid())
+  code        String    @unique
+  nom         String
+  description String?
+  parentId    String?
+  parent      FamilleProduit? @relation("FamilleHierarchie", fields: [parentId], references: [id])
+  enfants     FamilleProduit[] @relation("FamilleHierarchie")
+  produits    Produit[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("familles_produits")
+}
+
+model Laboratoire {
+  id          String    @id @default(uuid())
+  nom         String    @unique
+  pays        String?
+  contact     String?
+  email       String?
+  telephone   String?
+  produits    Produit[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("laboratoires")
+}
+
+model Produit {
+  id                String          @id @default(uuid())
+  codeInterne       String          @unique
+  codeBarres        String?         @unique
+  nomCommercial     String
+  dci               String?
+  dosage            String?
+  formeGalenique    FormeGalenique
+  conditionnement   String?
+  laboratoireId     String?
+  laboratoire       Laboratoire?    @relation(fields: [laboratoireId], references: [id])
+  familleId         String?
+  famille           FamilleProduit? @relation(fields: [familleId], references: [id])
+  classeATC         String?
+  statut            StatutProduit   @default(VENTE_LIBRE)
+  produitFroid      Boolean         @default(false)
+  prixAchatHT       Decimal         @db.Decimal(10, 2)
+  tauxTVA           Decimal         @default(0) @db.Decimal(5, 2)
+  prixVenteTTC      Decimal         @db.Decimal(10, 2)
+  stockMinimum      Int             @default(0)
+  stockMaximum      Int?
+  pointCommande     Int             @default(0)
+  emplacement       String?
+  photoUrl          String?
+  noticeUrl         String?
+  actif             Boolean         @default(true)
+  lots              Lot[]
+  lignesVente       LigneVente[]
+  lignesCommande    LigneCommandeAchat[]
+  mouvements        MouvementStock[]
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  @@index([nomCommercial])
+  @@index([dci])
+  @@index([codeBarres])
+  @@map("produits")
+}
+
+// ============================================
+// STOCKS ET LOTS
+// ============================================
+
+enum TypeMouvement {
+  ENTREE_ACHAT
+  SORTIE_VENTE
+  SORTIE_PERIME
+  SORTIE_CASSE
+  SORTIE_RETOUR
+  AJUSTEMENT_POSITIF
+  AJUSTEMENT_NEGATIF
+  TRANSFERT
+}
+
+model Lot {
+  id              String    @id @default(uuid())
+  numeroLot       String
+  produitId       String
+  produit         Produit   @relation(fields: [produitId], references: [id])
+  quantiteInitiale Int
+  quantiteRestante Int
+  datePeremption  DateTime
+  prixAchatLot    Decimal   @db.Decimal(10, 2)
+  receptionId     String?
+  reception       ReceptionAchat? @relation(fields: [receptionId], references: [id])
+  lignesVente     LigneVente[]
+  mouvements      MouvementStock[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([produitId, numeroLot])
+  @@index([datePeremption])
+  @@index([produitId])
+  @@map("lots")
+}
+
+model MouvementStock {
+  id            String        @id @default(uuid())
+  type          TypeMouvement
+  produitId     String
+  produit       Produit       @relation(fields: [produitId], references: [id])
+  lotId         String?
+  lot           Lot?          @relation(fields: [lotId], references: [id])
+  quantite      Int
+  motif         String?
+  reference     String?
+  utilisateurId String
+  utilisateur   Utilisateur   @relation(fields: [utilisateurId], references: [id])
+  createdAt     DateTime      @default(now())
+
+  @@index([produitId])
+  @@index([type])
+  @@index([createdAt])
+  @@map("mouvements_stock")
+}
+
+// ============================================
+// FOURNISSEURS ET ACHATS
+// ============================================
+
+enum StatutCommande {
+  BROUILLON
+  ENVOYEE
+  PARTIELLEMENT_RECUE
+  RECUE
+  ANNULEE
+}
+
+model Fournisseur {
+  id              String    @id @default(uuid())
+  raisonSociale   String
+  nif             String?
+  rccm            String?
+  contactPrincipal String?
+  telephone       String?
+  email           String?
+  adresse         String?
+  ville           String?
+  pays            String    @default("Djibouti")
+  conditionsPaiement String?
+  delaiLivraison  Int?
+  actif           Boolean   @default(true)
+  commandes       CommandeAchat[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("fournisseurs")
+}
+
+model CommandeAchat {
+  id              String          @id @default(uuid())
+  numero          String          @unique
+  fournisseurId   String
+  fournisseur     Fournisseur     @relation(fields: [fournisseurId], references: [id])
+  dateCommande    DateTime        @default(now())
+  dateLivraisonPrevue DateTime?
+  statut          StatutCommande  @default(BROUILLON)
+  totalHT         Decimal         @default(0) @db.Decimal(12, 2)
+  totalTVA        Decimal         @default(0) @db.Decimal(12, 2)
+  totalTTC        Decimal         @default(0) @db.Decimal(12, 2)
+  notes           String?
+  lignes          LigneCommandeAchat[]
+  receptions      ReceptionAchat[]
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  @@index([fournisseurId])
+  @@index([statut])
+  @@map("commandes_achat")
+}
+
+model LigneCommandeAchat {
+  id            String        @id @default(uuid())
+  commandeId    String
+  commande      CommandeAchat @relation(fields: [commandeId], references: [id], onDelete: Cascade)
+  produitId     String
+  produit       Produit       @relation(fields: [produitId], references: [id])
+  quantiteCommandee Int
+  quantiteRecue Int           @default(0)
+  prixUnitaireHT Decimal      @db.Decimal(10, 2)
+  tauxTVA       Decimal       @db.Decimal(5, 2)
+  totalHT       Decimal       @db.Decimal(12, 2)
+
+  @@index([commandeId])
+  @@map("lignes_commande_achat")
+}
+
+model ReceptionAchat {
+  id            String        @id @default(uuid())
+  numero        String        @unique
+  commandeId    String
+  commande      CommandeAchat @relation(fields: [commandeId], references: [id])
+  dateReception DateTime      @default(now())
+  numeroBL      String?
+  numeroFacture String?
+  notes         String?
+  lots          Lot[]
+  createdAt     DateTime      @default(now())
+
+  @@index([commandeId])
+  @@map("receptions_achat")
+}
+
+// ============================================
+// CLIENTS ET PATIENTS
+// ============================================
+
+enum Sexe {
+  HOMME
+  FEMME
+}
+
+model Client {
+  id              String    @id @default(uuid())
+  numeroClient    String    @unique
+  nom             String
+  prenom          String
+  dateNaissance   DateTime?
+  sexe            Sexe?
+  telephone       String?
+  email           String?
+  adresse         String?
+  ville           String?
+  poids           Float?
+  taille          Float?
+  groupeSanguin   String?
+  allergies       String?
+  pathologiesChroniques String?
+  traitementsEnCours String?
+  notes           String?
+  pointsFidelite  Int       @default(0)
+  carteCNSS       String?
+  mutuelleId      String?
+  mutuelle        Mutuelle? @relation(fields: [mutuelleId], references: [id])
+  numeroAdherent  String?
+  ventes          Vente[]
+  ordonnances     Ordonnance[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([nom, prenom])
+  @@index([telephone])
+  @@map("clients")
+}
+
+// ============================================
+// VENTES ET CAISSE
+// ============================================
+
+enum ModePaiement {
+  ESPECES
+  CARTE_BANCAIRE
+  D_MONEY
+  WAAFI
+  CREDIT_CLIENT
+  TIERS_PAYANT
+  CHEQUE
+  VIREMENT
+}
+
+enum StatutVente {
+  EN_COURS
+  VALIDEE
+  ANNULEE
+  AVOIR
+}
+
+model Vente {
+  id              String      @id @default(uuid())
+  numero          String      @unique
+  dateVente       DateTime    @default(now())
+  clientId        String?
+  client          Client?     @relation(fields: [clientId], references: [id])
+  utilisateurId   String
+  utilisateur     Utilisateur @relation(fields: [utilisateurId], references: [id])
+  ordonnanceId    String?
+  ordonnance      Ordonnance? @relation(fields: [ordonnanceId], references: [id])
+  statut          StatutVente @default(VALIDEE)
+  totalHT         Decimal     @db.Decimal(12, 2)
+  totalTVA        Decimal     @db.Decimal(12, 2)
+  totalRemise     Decimal     @default(0) @db.Decimal(12, 2)
+  totalTTC        Decimal     @db.Decimal(12, 2)
+  partPatient     Decimal     @default(0) @db.Decimal(12, 2)
+  partOrganisme   Decimal     @default(0) @db.Decimal(12, 2)
+  notes           String?
+  lignes          LigneVente[]
+  paiements       Paiement[]
+  cloturecaisseId String?
+  clotureCaisse   ClotureCaisse? @relation(fields: [cloturecaisseId], references: [id])
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+
+  @@index([dateVente])
+  @@index([clientId])
+  @@index([utilisateurId])
+  @@map("ventes")
+}
+
+model LigneVente {
+  id              String   @id @default(uuid())
+  venteId         String
+  vente           Vente    @relation(fields: [venteId], references: [id], onDelete: Cascade)
+  produitId       String
+  produit         Produit  @relation(fields: [produitId], references: [id])
+  lotId           String?
+  lot             Lot?     @relation(fields: [lotId], references: [id])
+  quantite        Int
+  prixUnitaireTTC Decimal  @db.Decimal(10, 2)
+  tauxTVA         Decimal  @db.Decimal(5, 2)
+  remise          Decimal  @default(0) @db.Decimal(10, 2)
+  totalTTC        Decimal  @db.Decimal(12, 2)
+
+  @@index([venteId])
+  @@map("lignes_vente")
+}
+
+model Paiement {
+  id          String       @id @default(uuid())
+  venteId     String
+  vente       Vente        @relation(fields: [venteId], references: [id], onDelete: Cascade)
+  mode        ModePaiement
+  montant     Decimal      @db.Decimal(12, 2)
+  reference   String?
+  createdAt   DateTime     @default(now())
+
+  @@index([venteId])
+  @@map("paiements")
+}
+
+model ClotureCaisse {
+  id              String      @id @default(uuid())
+  numero          String      @unique
+  dateCloture     DateTime    @default(now())
+  utilisateurId   String
+  utilisateur     Utilisateur @relation(fields: [utilisateurId], references: [id])
+  totalEspeces    Decimal     @default(0) @db.Decimal(12, 2)
+  totalCarte      Decimal     @default(0) @db.Decimal(12, 2)
+  totalMobile     Decimal     @default(0) @db.Decimal(12, 2)
+  totalCredit     Decimal     @default(0) @db.Decimal(12, 2)
+  totalTiers      Decimal     @default(0) @db.Decimal(12, 2)
+  totalGeneral    Decimal     @default(0) @db.Decimal(12, 2)
+  especesPhysiques Decimal    @default(0) @db.Decimal(12, 2)
+  ecart           Decimal     @default(0) @db.Decimal(12, 2)
+  notes           String?
+  ventes          Vente[]
+  createdAt       DateTime    @default(now())
+
+  @@map("clotures_caisse")
+}
+
+// ============================================
+// ORDONNANCES
+// ============================================
+
+model Prescripteur {
+  id          String    @id @default(uuid())
+  nom         String
+  prenom      String
+  specialite  String?
+  numeroOrdre String?
+  telephone   String?
+  email       String?
+  adresse     String?
+  ordonnances Ordonnance[]
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@map("prescripteurs")
+}
+
+model Ordonnance {
+  id              String        @id @default(uuid())
+  numero          String        @unique
+  clientId        String
+  client          Client        @relation(fields: [clientId], references: [id])
+  prescripteurId  String?
+  prescripteur    Prescripteur? @relation(fields: [prescripteurId], references: [id])
+  dateOrdonnance  DateTime
+  dateValidite    DateTime?
+  scanUrl         String?
+  notes           String?
+  utilisateurId   String
+  utilisateur     Utilisateur   @relation(fields: [utilisateurId], references: [id])
+  ventes          Vente[]
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  @@index([clientId])
+  @@map("ordonnances")
+}
+
+// ============================================
+// TIERS PAYANTS
+// ============================================
+
+model Mutuelle {
+  id              String    @id @default(uuid())
+  nom             String    @unique
+  contact         String?
+  telephone       String?
+  email           String?
+  adresse         String?
+  tauxPriseEnCharge Decimal @db.Decimal(5, 2)
+  conventionne    Boolean   @default(true)
+  clients         Client[]
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("mutuelles")
+}
+
+// ============================================
+// CONFIGURATION
+// ============================================
+
+model Configuration {
+  id          String   @id @default(uuid())
+  cle         String   @unique
+  valeur      String
+  type        String   @default("string")
+  description String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("configuration")
+}

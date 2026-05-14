@@ -1,0 +1,32 @@
+{
+  "name": "pharma-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Logiciel de gestion de pharmacie pour Djibouti",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "npm run dev --workspace=@pharma/api",
+    "dev:web": "npm run dev --workspace=@pharma/web",
+    "build": "npm run build --workspaces",
+    "test": "npm run test --workspaces",
+    "db:migrate": "npm run migrate --workspace=@pharma/database",
+    "db:seed": "npm run seed --workspace=@pharma/database",
+    "db:studio": "npm run studio --workspace=@pharma/database",
+    "lint": "eslint . --ext .ts,.tsx",
+    "format": "prettier --write \"**/*.{ts,tsx,json,md}\""
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "concurrently": "^8.2.2",
+    "eslint": "^8.56.0",
+    "prettier": "^3.2.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

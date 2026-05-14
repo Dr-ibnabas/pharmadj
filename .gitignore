@@ -1,0 +1,17 @@
+node_modules/
+dist/
+build/
+.env
+.env.local
+.env.production
+*.log
+logs/
+.DS_Store
+.idea/
+.vscode/
+coverage/
+.turbo/
+.next/
+uploads/
+backups/
+.claude/
